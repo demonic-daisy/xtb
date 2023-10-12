@@ -904,6 +904,8 @@ subroutine xtbMain(env, argParser)
          call main_property(iprop,env,mol,chk%wfn,calc%basis,calc%xtbData,res, &
             & calc%solvation,set%acc)
          call main_cube(set%verbose,mol,chk%wfn,calc%basis,res)
+      type is(TGFFCalculator)
+         call gfnff_property(iprop,mol%n,mol%xyz,calc%topo,chk%nlist)
       end select
    endif
 
@@ -1602,11 +1604,11 @@ subroutine parseArguments(env, args, inputFile, paramFile, lgrad, &
             call env%error("No solvent name provided for ALPB", source)
          end if
 
-      case('--cosmo')
+      case('--cosmo','--tmcosmo')
          call args%nextArg(sec)
          if (allocated(sec)) then
             call set_gbsa(env, 'solvent', sec)
-            call set_gbsa(env, 'cosmo', 'true')
+            call set_gbsa(env, flag(3:), 'true')
             call args%nextArg(sec)
             if (allocated(sec)) then
                if (sec == 'reference') then
