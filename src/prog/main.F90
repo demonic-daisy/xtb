@@ -958,6 +958,9 @@ subroutine xtbMain(env, argParser)
    type is(TxTBCalculator)
       call write_energy(env%unit,res,fres, &
         & (set%runtyp.eq.p_run_hess).or.(set%runtyp.eq.p_run_ohess).or.(set%runtyp.eq.p_run_bhess))
+   type is(TOniomCalculator)
+      call write_energy_oniom(env%unit,res,fres, &
+         & (set%runtyp.eq.p_run_hess).or.(set%runtyp.eq.p_run_ohess.or.(set%runtyp.eq.p_run_bhess)))
    class default
       call write_energy_gff(env%unit,res,fres, &
         & (set%runtyp.eq.p_run_hess).or.(set%runtyp.eq.p_run_ohess).or.(set%runtyp.eq.p_run_bhess))
@@ -1281,6 +1284,7 @@ subroutine parseArguments(env, args, inputFile, paramFile, lgrad, &
 #endif
    !$    endif
    !$    endif
+
       case('--restart')
          restart = .true.
 
@@ -1444,8 +1448,7 @@ subroutine parseArguments(env, args, inputFile, paramFile, lgrad, &
          call set_exttyp('oniom')
          call args%nextArg(sec) 
 
-         !> To handle no argument case
-         if (.not.allocated(sec)) then
+         if (.not.allocated(sec)) then ! handle no argument case ! 
             call env%error("No inner region is  provided for ONIOM", source)
             return
          end if
@@ -1467,7 +1470,7 @@ subroutine parseArguments(env, args, inputFile, paramFile, lgrad, &
       case('--cut')
          call set_cut
       
-      case('--etemp')
+      case('--etemp', '--temp')
          call args%nextArg(sec)
          if (allocated(sec)) then
             call set_scc(env,'temp',sec)
@@ -1549,7 +1552,7 @@ subroutine parseArguments(env, args, inputFile, paramFile, lgrad, &
          call set_write(env,'fod','true')
          call set_scc(env,'temp','5000.0')
 
-      case('--iterations')
+      case('--iterations', '--maxiterations')
          call args%nextArg(sec)
          if (allocated(sec)) then
             call set_scc(env,'maxiterations',sec)
