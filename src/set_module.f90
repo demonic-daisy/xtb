@@ -192,6 +192,7 @@ subroutine write_set_opt(ictrl)
       case default;            write(ictrl,'("unknown")')
       case(p_engine_rf);       write(ictrl,'("rf")')
       case(p_engine_lbfgs);    write(ictrl,'("lbfgs")')
+      case(p_engine_pbc_lbfgs);    write(ictrl,'("pbc_lbfgs")')
       case(p_engine_inertial); write(ictrl,'("inertial")')
       end select
    end if
@@ -957,8 +958,12 @@ subroutine set_exttyp(typ)
       set%mode_extrun = p_ext_mopac
    case('ff')
       set%mode_extrun = p_ext_gfnff
+   case('mcff')
+      set%mode_extrun = p_ext_mcgfnff
    case('iff')
       set%mode_extrun = p_ext_iff
+   case('ptb')
+      set%mode_extrun = p_ext_ptb
    end select
    set1 = .false.
 
@@ -988,6 +993,29 @@ subroutine set_geopref(typ)
    set1 = .false.
 end subroutine set_geopref
 
+subroutine set_raman(env,val)
+   
+   implicit none 
+   character(len=*), parameter :: source = 'set_raman' 
+   type(TEnvironment), intent(inout) :: env
+   character(len=*), intent(in) :: val
+   real(wp) :: idum
+
+   logical, save :: set1 = .true.
+   logical, save :: set2 = .true.
+   
+   if (set1) then
+      if (getValue(env,val,idum)) set%ptbsetup%raman_temp = idum 
+      set1 =.false.
+   else if (set2) then
+      if (getValue(env,val,idum)) then
+         idum=10**7/idum
+         set%ptbsetup%raman_lambda = idum 
+         set2 =.false.
+      endif
+   endif
+   
+end subroutine set_raman
 subroutine set_runtyp(typ)
    implicit none
    character(len=*),intent(in) :: typ
@@ -1048,6 +1076,28 @@ subroutine set_runtyp(typ)
    end select
    set1 = .false.
 end subroutine set_runtyp
+
+subroutine set_elprop(typ)
+   implicit none
+   character(len=*),intent(in) :: typ
+
+   select case(typ)
+   case default ! do nothing !
+      call raise('E',typ//' is no valid runtyp (internal error)')
+   case('alpha')
+      set%elprop = p_elprop_alpha
+   case('polar')
+      set%elprop = p_elprop_alpha
+   case('raman')
+      set%elprop = p_elprop_alpha
+      call set_runtyp('hess')
+   case('ir')
+      set%elprop = p_elprop_dipole
+   case('dipole')
+      set%elprop = p_elprop_dipole
+   end select
+
+end subroutine set_elprop
 
 subroutine set_derived
    implicit none
@@ -1164,7 +1214,6 @@ end subroutine set_spin
 
 
 subroutine set_efield(env, val)
-   use xtb_gfnff_param, only : efield
    implicit none
    character(len=*), parameter :: source = 'set_efield'
    type(TEnvironment), intent(inout) :: env
@@ -1174,13 +1223,14 @@ subroutine set_efield(env, val)
    logical,save :: set1 = .true.
    if (set1) then
       if (getValue(env,val,idum)) then
-         efield = idum
+         set%efield = idum
       else
          call env%error('E-field could not be read from your argument', source)
       endif
    endif
    set1 = .false.
 end subroutine set_efield
+
 
 
 subroutine set_write(env,key,val)
@@ -1660,6 +1710,7 @@ subroutine set_opt(env,key,val)
          case default; call env%warning("engine '"//val//"' is not implemented",source)
          case('rf','ancopt');      set%opt_engine = p_engine_rf
          case('lbfgs','l-ancopt'); set%opt_engine = p_engine_lbfgs
+         case('pbc_lbfgs');        set%opt_engine = p_engine_pbc_lbfgs
          case('inertial','fire');  set%opt_engine = p_engine_inertial
          end select
       end if

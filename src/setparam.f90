@@ -74,9 +74,10 @@ module xtb_setparam
    integer, parameter :: p_olev_vtight  =  2
    integer, parameter :: p_olev_extreme =  3
    ! geometry optimization backend
-   integer, parameter :: p_engine_rf       = 1
-   integer, parameter :: p_engine_lbfgs    = 2
-   integer, parameter :: p_engine_inertial = 3
+   integer, parameter :: p_engine_rf        = 1
+   integer, parameter :: p_engine_lbfgs     = 2
+   integer, parameter :: p_engine_inertial  = 3
+   integer, parameter :: p_engine_pbc_lbfgs = 4
 
    integer, parameter :: p_modh_read     = -2
    integer, parameter :: p_modh_unit     = -1
@@ -157,6 +158,22 @@ module xtb_setparam
 
    end type qm_external
 
+   type TPTBSetup
+      !> Do PTB additionally to the normal run in hessian
+      logical :: ptb_in_hessian = .false.
+      !> Electronic structure method for the energetic hessian part
+      character(len=:), allocatable :: hessmethod
+      !> temperature for Raman (in K)
+      real(wp):: raman_temp = 298.15_wp
+   
+      !> incident laser wavelength for Raman (in nm)
+      real(wp):: raman_lambda = 19435.0_wp
+   end type TPTBSetup
+
+   integer, parameter :: p_elprop_beta = 2
+   integer, parameter :: p_elprop_alpha = 1
+   integer, parameter :: p_elprop_dipole = 0
+
    integer, parameter :: p_ext_vtb       = -1
    integer, parameter :: p_ext_eht       =  0
    integer, parameter :: p_ext_xtb       =  1
@@ -168,6 +185,8 @@ module xtb_setparam
    integer, parameter :: p_ext_oniom     = 14
    integer, parameter :: p_ext_iff       = 15
    integer, parameter :: p_ext_tblite    = 16
+   integer, parameter :: p_ext_ptb       = 17
+   integer, parameter :: p_ext_mcgfnff   = 18
 
    integer, parameter :: p_run_scc    =   2
    integer, parameter :: p_run_grad   =   3
@@ -212,6 +231,9 @@ module xtb_setparam
 
 !  shift molecule to center of mass
    logical  :: do_cma_trafo = .false.
+
+!  static homogenous external electric field in a.u.
+   real(wp) :: efield(3) = [0.0_wp, 0.0_wp, 0.0_wp]
 
 ! linear dependencies overlap cut-off stuff
    real(wp) :: lidethr = 0.00001_wp   ! cut-off threshold for small overlap eigenvalues
@@ -469,6 +491,7 @@ module xtb_setparam
    integer  :: mode_extrun = 1 ! xtb is default
 !  integer  :: dummyint ! not used
    integer  :: runtyp = 2 ! SCC by default
+   integer  :: elprop = 0 ! dipole by default
    logical  :: rdset = .false.
 
    ! ENSO (ENergic SOrting something algorithm) compatibility mode
@@ -491,9 +514,9 @@ module xtb_setparam
 !  character(len=80) :: inputname = ''
    character(len= 4) :: pgroup = 'C1  '
 !! ------------------------------------------------------------------------
-    
-   end type
-   
+   !> PTB settings
+   type(TPTBSetup) :: ptbsetup
+   end type TSet
 
    type(TSet) :: set
 

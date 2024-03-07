@@ -386,18 +386,27 @@ $opt
 
 *kstretch*='real'::
    stretch force constant in model hessian
+
 *kbend*='real'::
    bend force constant in model hessian
+
 *ktorsion*='real'::
    torsion force constant in model hessian
+
 *koutofp*='real'::
    out-of-plain force constant to model hessian
+
 *kvdw*='real'::
    additional vdW-contribution (lindh|swart only)
+
 *kes*='real'::
    electrostatic contribution to model hessian by EEQ model
+
 *rcut*='real'::
    distance cutoff for bonds in model hessian
+
+*exact rf*='bool'::
+   use better solver during the rational function optimization
 
 $path (6.1 only)
 ~~~~~~~~~~~~~~~~
@@ -534,6 +543,12 @@ $wall
 *ellipsoid*: auto|'real',auto|'real',auto|'real',all|'list',...::
     set up a ellipsoid wall potential for all or the atoms in 'list'
     with the radii 'real' or an automatical determined sphere radius
+    If 'auto' is chosen for axes, sphere potential is applied, no ellipsoid!!!
+
+*sandwich*: auto|'real',all|'list',...::
+   set up a sandwich wall potential for all or the atoms in 'list'
+   with the radius 'real' or an automatical determined sandwich radius in Bohr
+   Only potential=logfermi ist available. diameter=2*radius+2*4A safety buffer
 
 
 $write

@@ -278,10 +278,12 @@ subroutine writeOrcaInp(env,io,mol,input,mode)
    write(io,'("#",1x,a)') &
       "ORCA input is generated automatically. Not correct way."
    
+   num_threads = 1 ! default
+
    ! number of cores !
    !$omp parallel
    !$omp master
-      num_threads = omp_get_num_threads()
+   !$   num_threads = omp_get_num_threads()
    !$omp end master
    !$omp end parallel 
    
@@ -665,7 +667,7 @@ subroutine singlepoint(self, env, mol, chk, printlevel, restart, &
 end subroutine singlepoint
 
 !> Evaluate hessian by finite difference for all atoms
-subroutine hessian(self, env, mol0, chk0, list, step, hess, dipgrad)
+subroutine hessian(self, env, mol0, chk0, list, step, hess, dipgrad, polgrad)
    character(len=*), parameter :: source = "extern_turbomole_hessian"
    !> Single point calculator
    class(TOrcaCalculator), intent(inout) :: self
@@ -683,6 +685,8 @@ subroutine hessian(self, env, mol0, chk0, list, step, hess, dipgrad)
    real(wp), intent(inout) :: hess(:, :)
    !> Array to add dipole gradient to
    real(wp), intent(inout) :: dipgrad(:, :)
+   !> Array to add polarizability gradient to
+   real(wp), intent(inout), optional :: polgrad(:, :)
 
    integer :: i,j,err
    integer :: iorca ! file handle
