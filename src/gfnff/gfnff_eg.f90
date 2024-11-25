@@ -197,6 +197,7 @@ subroutine gfnff_eg(env,mol,pr,n,ichrg,at,xyz,sigma,g,etot,res_gff, &
    real(wp),allocatable :: xtmp(:)
    type(tb_timer) :: timer
    real(wp) :: dispthr, cnthr, repthr, hbthr1, hbthr2
+   real(wp) :: dist(n,n)
    real(wp) :: ds(3,3)
    real(wp) :: convF  !convergence factor alpha, aka ewald parameter 
    logical, allocatable :: considered_ABH(:,:,:)
@@ -225,9 +226,6 @@ subroutine gfnff_eg(env,mol,pr,n,ichrg,at,xyz,sigma,g,etot,res_gff, &
 
    ! get Distances between atoms for repulsion
    call neigh%getTransVec(env,mol,sqrt(repthr))
-   if(allocated(neigh%distances)) deallocate(neigh%distances)
-   call getDistances(neigh%distances, mol, neigh)
-
 
    g  =  0
    exb = 0
@@ -291,6 +289,18 @@ subroutine gfnff_eg(env,mol,pr,n,ichrg,at,xyz,sigma,g,etot,res_gff, &
       sqrab(ij + i) = 0.0d0
       srab(ij + i) = 0.0d0
    enddo
+   if (mol%npbc.ne.0) then
+   dist = 0.0_wp
+   !$omp parallel do collapse(2) default(none) shared(dist,mol) &
+   !$omp private(i,j)
+   do i=1, mol%n
+     do j=1, mol%n
+       dist(j,i) = NORM2(mol%xyz(:,j)-mol%xyz(:,i))
+     enddo
+   enddo
+   !$omp end parallel do
+   endif
+
    if (pr) call timer%measure(1)
 
    !----------!
@@ -434,7 +444,7 @@ subroutine gfnff_eg(env,mol,pr,n,ichrg,at,xyz,sigma,g,etot,res_gff, &
      if (pr) call timer%measure(4)
    else
      if (pr) call timer%measure(4,'EEQ energy and q')
-     call goed_pbc_gfnff(env,mol,accuracy.gt.1,n,at,neigh%distances(:,:,1), &
+     call goed_pbc_gfnff(env,mol,accuracy.gt.1,n,at,dist, &
      & dfloat(ichrg),eeqtmp,cn,nlist%q,ees,solvation,param,topo, gTrans, &
      & rTrans, xtmp, convF)  ! without dq/dr
      ees = ees*mcf_ees 
@@ -555,7 +565,7 @@ endif
       endif
       deallocate(dcn, dcndr)
       allocate(dEdcn(n),source=0.0_wp)
-      allocate(considered_ABH(n,n,n), source=.false.)
+      allocate(considered_ABH(topo%hb_mapNAB,topo%hb_mapNAB,topo%hb_mapNH), source=.false.)
 
      !$omp parallel do default(none) reduction(+:g, ebond, sigma, dEdcn) &
      !$omp shared(grab0, topo, neigh, param, rab0, rabdcn, xyz, at, hb_cn, hb_dcn, n, dhbcndL, considered_ABH) &
@@ -602,7 +612,7 @@ endif
          dx=xa-xyz(1,jat)-neigh%transVec(1,iTr)
          dy=ya-xyz(2,jat)-neigh%transVec(2,iTr)
          dz=za-xyz(3,jat)-neigh%transvec(3,iTr)
-         rab=neigh%distances(jat,iat,iTr)
+         rab=NORM2(xyz(:,iat)-(xyz(:,jat)+neigh%transVec(:,iTr)))
          r2=rab**2
          ati=at(iat)
          atj=at(jat)
@@ -734,8 +744,6 @@ endif
    call neigh%getTransVec(env,mol,sqrt(hbthr2))
    if (pr) call timer%measure(10,'HB/XB (incl list setup)')
    if (update.or.require_update) then
-     if(allocated(neigh%distances)) deallocate(neigh%distances)
-     call getDistances(neigh%distances, mol, neigh)
      call gfnff_hbset(n,at,xyz,topo,neigh,nlist,hbthr1,hbthr2)
    end if
 
@@ -781,12 +789,11 @@ endif
            nbk=0
            iTr=0 ! nbk is the first neighbor of k !
            atnb=0
-           call neigh%jth_nb(nbk,1,k,iTr)
+           call neigh%jth_nb(n,xyz,nbk,1,k,iTr)
            ! get iTrC and cycle if out of cutoff (the cutoff used in last getTransVec call)
            iTrDum=neigh%fTrSum(iTr,iTrk)
            if(iTrDum.eq.-1.or.iTrDum.gt.neigh%nTrans)  cycle
            ! get number neighbors of neighbor of k !
-           if(nbk.le.0 .or. nbk.gt.n) write(*,*) 'nbk=',nbk
            if(nbk.ne.0) then
               nbnbk=sum(neigh%nb(neigh%numnb,nbk,:))
               atnb=at(nbk)
@@ -1038,7 +1045,7 @@ subroutine egbond_hb(i,iat,jat,iTr,rab,rij,drij,drijdcn,hb_cn,hb_dcn,n,at,xyz,e,
       real*8,intent(in)    :: hb_cn(n)
       real*8,intent(in)    :: hb_dcn(3,n,n)
       real(wp), intent(in) :: dhbcndL(3,3,n)
-      logical, intent(inout)  :: considered_ABH(n,n,n) ! only consider ABH triplets once; indep of iTr
+      logical, intent(inout)  :: considered_ABH(topo%hb_mapNAB,topo%hb_mapNAB,topo%hb_mapNH)! only consider ABH triplets once; indep of iTr
       real*8,intent(inout) :: e
       real*8,intent(inout) :: g(3,n)
       real*8,intent(inout) :: sigma(3,3)
@@ -1048,11 +1055,11 @@ subroutine egbond_hb(i,iat,jat,iTr,rab,rij,drij,drijdcn,hb_cn,hb_dcn,n,at,xyz,e,
       integer j,k
       integer jA,jH,iTrA,iTrH,iTrB
       integer hbH,hbB,hbA
+      integer mapA,mapB,mapH
       real*8 dr,dum
       real*8 dx,dy,dz,vrab(3),dg(3)
       real*8 yy,zz
       real*8 t1,t4,t5,t6,t8
-
 
          if (at(iat).eq.1) then
            hbH=iat
@@ -1128,8 +1135,11 @@ subroutine egbond_hb(i,iat,jat,iTr,rab,rij,drij,drijdcn,hb_cn,hb_dcn,n,at,xyz,e,
                   hbB = topo%bond_hb_B(1,k,j)
                   iTrB= topo%bond_hb_B(2,k,j)
                  ! only add gradient one time per ABH triple (independent of iTrB)
-                 if(.not.considered_ABH(hbA,hbB,hbH)) then
-                   considered_ABH(hbA,hbB,hbH)=.true.
+                  mapA=topo%hb_mapABH(hbA)
+                  mapB=topo%hb_mapABH(hbB)
+                  mapH=topo%hb_mapABH(hbH)
+                 if(.not.considered_ABH(mapA,mapB,mapH)) then
+                   considered_ABH(mapA,mapB,mapH)=.true.
                    dg=hb_dcn(:,hbB,hbH)*zz
                    g(:,hbB)=g(:,hbB)-dg
                  endif
@@ -2280,7 +2290,7 @@ subroutine abhgfnff_eg2new(n,A,B,H,iTrA,iTrB,nbb,at,xyz,q,sqrab, &
 !     Neighbours of B
       do i=1,nbb
          inb=0; iTr=0 ! jth_nb output
-         call neigh%jth_nb(inb,i,B,iTr) ! inb is the i-th nb of B when inb is shifted to iTr
+         call neigh%jth_nb(n,xyz,inb,i,B,iTr) ! inb is the i-th nb of B when inb is shifted to iTr
 !        compute distances
          vecDum = neigh%transVec(:,iTr)+neigh%transVec(:,iTrB)
          dranb(1:3,i) = (xyz(1:3,A)+neigh%transVec(1:3,iTrA)) -(xyz(1:3,inb)+vecDum)
@@ -2453,7 +2463,7 @@ subroutine abhgfnff_eg2new(n,A,B,H,iTrA,iTrB,nbb,at,xyz,q,sqrab, &
       gdr(1:3,H) = gdr(1:3,H) + gh(1:3)
       do i=1,nbb
          inb=0; iTr=0 ! jth_nb output
-         call neigh%jth_nb(inb,i,B,iTr) ! inb is the i-th nb of B when shifted to iTr
+         call neigh%jth_nb(n,xyz,inb,i,B,iTr) ! inb is the i-th nb of B when shifted to iTr
          gdr(1:3,inb) = gdr(1:3,inb) + gnb(1:3,i)
       end do
 
@@ -2463,7 +2473,7 @@ subroutine abhgfnff_eg2new(n,A,B,H,iTrA,iTrB,nbb,at,xyz,q,sqrab, &
       sigma=sigma+mcf_ehb*spread(gh,1,3)*spread(xyz(:,H),2,3)
       do i=1,nbb
          inb=0; iTr=0 ! jth_nb output
-         call neigh%jth_nb(inb,i,B,iTr) ! inb is the i-th nb of B when shifted to iTr
+         call neigh%jth_nb(n,xyz,inb,i,B,iTr) ! inb is the i-th nb of B when shifted to iTr
          vecDum = neigh%transVec(:,iTr)+neigh%transVec(:,iTrB)
          sigma=sigma+mcf_ehb*spread(gnb(:,i),1,3)*spread(xyz(:,inb)+vecDum,2,3)
       enddo
@@ -2540,7 +2550,7 @@ subroutine abhgfnff_eg2_rnr(n,A,B,H,iTrA,iTrB,at,xyz,q,sqrab,srab,energy,gdr,par
 !     Neighbours of B
       do i=1,nbb
          inb=0; iTr=0 ! jth_nb output
-         call neigh%jth_nb(inb,i,B,iTr) ! inb is the i-th nb of B when shifted to iTr
+         call neigh%jth_nb(n,xyz,inb,i,B,iTr) ! inb is the i-th nb of B when shifted to iTr
 !        compute distances
          vTrinb=neigh%transVec(:,iTr)+neigh%transVec(:,iTrB)
          dranb(1:3,i) = (xyz(1:3,A)+neigh%transVec(1:3,iTrA)) -(xyz(1:3,inb)+vTrinb)
@@ -2750,7 +2760,7 @@ subroutine abhgfnff_eg2_rnr(n,A,B,H,iTrA,iTrB,at,xyz,q,sqrab,srab,energy,gdr,par
       gdr(1:3,H) = gdr(1:3,H) + gh(1:3)
       do i=1,nbb
          inb=0; iTr=0 ! jth_nb output
-         call neigh%jth_nb(inb,i,B,iTr) ! inb is the i-th nb of B when shifted to iTr
+         call neigh%jth_nb(n,xyz,inb,i,B,iTr) ! inb is the i-th nb of B when shifted to iTr
          gdr(1:3,inb) = gdr(1:3,inb) + gnb(1:3,i) - gnb_lp(1:3)/dble(nbb)
       end do
 
@@ -2761,7 +2771,7 @@ subroutine abhgfnff_eg2_rnr(n,A,B,H,iTrA,iTrB,at,xyz,q,sqrab,srab,energy,gdr,par
       sigma=sigma+mcf_ehb*spread(gnb_lp,1,3)*spread(xyz(:,B)+neigh%transVec(1:3,iTrB),2,3)
       do i=1,nbb
          inb=0; iTr=0 ! jth_nb output
-         call neigh%jth_nb(inb,i,B,iTr) ! inb is the i-th nb of B when shifted to iTr
+         call neigh%jth_nb(n,xyz,inb,i,B,iTr) ! inb is the i-th nb of B when shifted to iTr
          vTrinb=neigh%transVec(:,iTr)+neigh%transVec(:,iTrB)
          sigma=sigma+mcf_ehb*spread(gnb(:,i),1,3)*spread(xyz(:,inb)+vTrinb,2,3)
          sigma=sigma-mcf_ehb*spread(gnb_lp(1:3)/dble(nbb),1,3)*spread(xyz(:,inb)+vTrinb,2,3)
@@ -3264,8 +3274,8 @@ subroutine batmgfnff_eg(n,iat,jat,kat,iTrj,iTrk,at,xyz,q,sqrab,srab,energy,g,ds,
    real*8 r2ij,r2jk,r2ik,c9,mijk,imjk,ijmk,rijk3,ang,angr9,rav3
    real*8 rij(3),rik(3),rjk(3),ri(3),rj(3),rk(3),drij,drik,drjk,dang,ff,fi,fj,fk,fqq
    parameter (fqq=3.0d0)
-   integer linij,linik,linjk,lina,i,j,iTrDum,dm1,dm2
-    lina(i,j)=min(i,j)+max(i,j)*(max(i,j)-1)/2
+   integer :: linij,linik,linjk,lina,i,j,iTrDum,dm1,dm2
+   lina(i,j)=min(i,j)+max(i,j)*(max(i,j)-1)/2
 
    fi=(1.d0-fqq*q(iat))
    fi=min(max(fi,-4.0d0),4.0d0)
@@ -3275,13 +3285,13 @@ subroutine batmgfnff_eg(n,iat,jat,kat,iTrj,iTrk,at,xyz,q,sqrab,srab,energy,g,ds,
    fk=min(max(fk,-4.0d0),4.0d0)
    ff=fi*fj*fk ! charge term
    c9=ff*param%zb3atm(at(iat))*param%zb3atm(at(jat))*param%zb3atm(at(kat)) ! strength of interaction
-   r2ij=neigh%distances(jat,iat,iTrj)**2
-   r2ik=neigh%distances(kat,iat,iTrk)**2
+   r2ij=NORM2(xyz(:,iat)-(xyz(:,jat)+neigh%transVec(:,iTrj)))**2
+   r2ik=NORM2(xyz(:,iat)-(xyz(:,kat)+neigh%transVec(:,iTrk)))**2
    iTrDum=neigh%fTrSum(neigh%iTrNeg(iTrj),iTrk)
    if(iTrDum.le.0.or.iTrDum.gt.neigh%numctr) then
       r2jk=NORM2((xyz(:,kat)+neigh%transVec(:,iTrk))-(xyz(:,jat)+neigh%transVec(:,iTrj)))**2
    else
-      r2jk=neigh%distances(kat,jat,iTrDum)**2 !use adjusted iTr since jat is actually shifted
+      r2jk=NORM2(xyz(:,jat)-(xyz(:,kat)+neigh%transVec(:,iTrDum)))**2
    endif
    mijk=-r2ij+r2jk+r2ik
    imjk= r2ij-r2jk+r2ik
@@ -4036,9 +4046,9 @@ function get_cf(rTrans,gTrans,vol,avgAlp) result(cf)
   integer, parameter :: ewaldCutD(3) = 2
   integer, parameter :: ewaldCutR(3) = 2
   ! real space lattice vectors
-  real(wp), intent(in) :: rTrans( 3, product(2*ewaldCutD+1))
+  real(wp), intent(in) :: rTrans(:, :)
   ! reciprocal space lattice vectors
-  real(wp), intent(in) :: gTrans(3, product(2*ewaldCutR+1)-1)
+  real(wp), intent(in) :: gTrans(:, :)
   ! unit cell volume 
   real(wp), intent(in) :: vol
   ! average alphaEEQ value
